@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # mtproxy-install.sh
-# Установка MTProto Proxy с FakeTLS напрямую на порт 443
+# Установка MTProto Proxy с FakeTLS на порт 4443
 
 set -euo pipefail
 
@@ -72,9 +72,7 @@ validate_domain() {
 # Генерация секрета FakeTLS (ee-префикс)
 generate_secret() {
     local domain=$1
-    # 16 байт = 32 hex символа для ключа
     local secret_key=$(openssl rand -hex 16)
-    # Домен в hex для маскировки
     local domain_hex=$(echo -n "$domain" | xxd -ps)
     echo "ee${secret_key}${domain_hex}"
 }
@@ -92,7 +90,6 @@ install_docker() {
     curl -fsSL https://get.docker.com | sh
     systemctl enable --now docker
     
-    # Проверка
     if ! docker run --rm hello-world &> /dev/null; then
         log_error "Docker не работает корректно"
         exit 1
@@ -114,17 +111,17 @@ get_params() {
         log_warn "Примеры правильных доменов: cloudflare.com, www.google.com, github.com"
     done
     
-    # Порт
+    # Порт (изменён на 4443)
     while true; do
-        read -rp "Порт [443]: " PORT
-        PORT=${PORT:-443}
+        read -rp "Порт [4443]: " PORT
+        PORT=${PORT:-4443}
         [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT >= 1 && PORT <= 65535 )) && break
         log_warn "Введите число от 1 до 65535"
     done
     
     check_port "$PORT"
     
-    # Тег (опционально, для статистики)
+    # Тег (опционально)
     read -rp "Тег прокси (опционально, для @MTProxybot): " PROXY_TAG
     PROXY_TAG=${PROXY_TAG:-}
     
@@ -160,7 +157,6 @@ setup_dirs() {
     mkdir -p "$WORK_DIR"/{data,logs}
     cd "$WORK_DIR"
     
-    # Очистка старых данных при необходимости
     if [[ -d "$WORK_DIR/data" ]] && [[ "$(ls -A "$WORK_DIR/data" 2>/dev/null)" ]]; then
         log_warn "Найдены старые данные"
         read -rp "Сохранить статистику и секрет? [Y/n]: " keep
@@ -282,7 +278,6 @@ start_service() {
     docker compose down 2>/dev/null || true
     docker compose up -d
     
-    # Ожидание запуска
     local retries=0
     while [[ $retries -lt 10 ]]; do
         if docker compose ps | grep -q "healthy\|Up"; then
@@ -317,10 +312,8 @@ save_info() {
     local info_file="$WORK_DIR/proxy-info.txt"
     local qr_file="$WORK_DIR/proxy-qr.txt"
     
-    # Ссылка подключения
     local link="tg://proxy?server=${ip}&port=${PORT}&secret=${SECRET}"
     
-    # JSON для бота
     local json_info=$(jq -n \
         --arg server "$ip" \
         --arg port "$PORT" \
@@ -364,7 +357,6 @@ mtproxy update             # Обновление
 Логи: ${WORK_DIR}/logs/
 EOF
     
-    # Генерация QR кода (если установлен qrencode)
     if command -v qrencode &> /dev/null; then
         echo "$link" | qrencode -t ANSIUTF8 > "$qr_file"
         echo "" >> "$info_file"
@@ -406,6 +398,9 @@ show_final() {
     echo -e "   Инфо:   ${WORK_DIR}/proxy-info.txt"
     echo ""
     echo -e "${GREEN}Для добавления в Telegram скопируйте ссылку выше${NC}"
+    echo ""
+    echo -e "${YELLOW}⚠️  Важно:${NC} Используется нестандартный порт ${CYAN}4443${NC}"
+    echo -e "   Убедитесь, что порт открыт в фаерволе"
 }
 
 # Настройка фаервола
@@ -421,7 +416,8 @@ setup_firewall() {
         log_info "Порт $PORT открыт в firewalld"
     else
         log_warn "Не удалось настроить фаервол автоматически"
-        log_warn "Откройте порт $PORT/tcp вручную"
+        log_warn "Откройте порт $PORT/tcp вручную:"
+        log_warn "  iptables -A INPUT -p tcp --dport $PORT -j ACCEPT"
     fi
 }
 
@@ -439,7 +435,7 @@ main() {
     echo -e "${CYAN}"
     echo "╔════════════════════════════════════════╗"
     echo "║     MTProto Proxy Installer            ║"
-    echo "║     with FakeTLS support               ║"
+    echo "║     Port 4443 | FakeTLS enabled        ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     
